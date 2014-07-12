@@ -7,13 +7,31 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 
+def lines_to_string(lines):
+    return "\n".join(" ".join(l) for l in lies)
+
 @contextmanager
-def git_ssh_env(key_path):
+def git_ssh_env(key_path, known_hosts):
     """Return an environment dictionary that has been setup with
     the proper GIT_SSH set to enable git commands with SSH configured
     properly."""
     with tempfile.NamedTemporaryFile(delete=False) as f:
-        f.write("#!/bin/sh\nexec /usr/bin/ssh -i {} \"$@\"\n".format(key_path))
+        if known_hosts:
+            with tempfile.NamedTemporaryFile(delete=False) as khf:
+                for kh in known_hosts:
+                    khf.write(kh + "\n")
+        else:
+            khf = None
+
+        f.write(
+            lines_to_string(
+                [["#!/bin/sh"],
+                 ["exec", "/usr/bin/ssh"] + \
+                     ["-i", key_path] + \
+                     (["-o", "UserKnownHostsFile", khf.name]
+                         if khf
+                         else []) + \
+                     "\"$@\""]]))
     mcv.file.chmod(f.name, 0700)
     env = os.environ.copy()
     env['GIT_SSH'] = f.name
@@ -35,7 +53,7 @@ def repo_exists(path, verbose='error'):
                 stderr=stderr)
     return retval == 0
 
-def clone(repo_url, repo_path, key_path):
+def clone(repo_url, repo_path, key_path, known_hosts=None):
     if not repo_exists(repo_path):
         with git_ssh_env(key_path) as env:
             retval = subprocess.call(['git', 'clone', repo_url, repo_path], env=env)
